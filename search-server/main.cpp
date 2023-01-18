@@ -73,14 +73,9 @@ public:
         const vector<string> words = SplitIntoWordsNoStop(document);
         Document doc;
         doc.id = document_id;
-        for (const auto &word: words) {
-            // Сколько раз встречается слово в документе
-            doc.relevance = count_if(
-                    words.begin(), words.end(), [&word](const auto &s) {
-                        return s == word;
-                    });
-            word_to_document_freqs_[word].insert(
-                    {doc.id, doc.relevance / words.size()});
+        const double inv_word_count = 1.0 / words.size();
+        for (const string& word : words) {
+            word_to_document_freqs_[word][document_id] += inv_word_count;
         }
         ++document_count_;
     }
@@ -123,6 +118,12 @@ private:
         return stop_words_.count(word) > 0;
     }
 
+    // IDF слова
+    double IDFWord(const double &document_size) const {
+        // Статическое преобразование типа в double
+        return log(document_count_ / static_cast<double>(document_size));
+    }
+
     // Вычислите IDF слова кот. Оно встречается в двух документах из трёх: 0 и 1
     // 3 / 2 = 1,5
     // вычисляется IDF каждого слова в запросе
@@ -140,11 +141,12 @@ private:
          */
         for (const auto &plus_word: query.plus_words) {
             if (word_to_document_freqs_.count(plus_word)) {
-                map document_ids = word_to_document_freqs_.at(plus_word);
+                // Константная ссылка
+                const auto &document_ids = word_to_document_freqs_.at(plus_word);
                 // К результату деления применяют логарифм — функцию log из библиотеки <cmath>
                 // это IDF текущего слова
                 // Количество всех документов делят на количество документов, где встречается
-                idf_word = log(document_count_ / double(document_ids.size()));
+                idf_word = IDFWord(document_ids.size());
                 // IDF каждого слова запроса умножается на TF этого слова в этом документе,
                 // все произведения IDF и TF в документе суммируются.
                 for (const auto &document: document_ids) {
