@@ -1,17 +1,17 @@
 #include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
-#include <map>
-#include <cmath>
-
+#include <numeric>
 
 using namespace std;
+//https://practicum.yandex.ru/trainer/cpp/lesson/acde8277-00df-49d7-b5dc-f24df945227d/task/1eb3e274-a62a-4701-bc33-11019f96eea2/?hideTheory=1
 
-// https://practicum.yandex.ru/trainer/cpp/lesson/db917dd8-0bbf-4c25-ba23-474534ccc4aa/task/80b48a36-4d57-46ed-a783-788207e516e8/?hideTheory=1
-// авторское решение: https://pastebin.com/VHJ91CJt
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
+
 
 string ReadLine() {
     string s;
@@ -20,10 +20,23 @@ string ReadLine() {
 }
 
 int ReadLineWithNumber() {
-    int result = 0;
+    int result;
     cin >> result;
-    ReadLine();
+    ReadLine(); // пропуск пустой строки после cin
     return result;
+}
+
+vector<int> ReadLineRating() {
+    int num_rating = 0;
+    vector<int> rating;
+    cin >> num_rating; // число оценок (первое число в строке ввода)
+    for (int i = 0; i < num_rating; i++) {
+        int f = 0; // оценка
+        cin >> f;
+        rating.push_back(f);
+    }
+    ReadLine();
+    return rating;
 }
 
 vector<string> SplitIntoWords(const string &text) {
@@ -48,6 +61,7 @@ vector<string> SplitIntoWords(const string &text) {
 struct Document {
     int id;
     double relevance;
+    int rating;
 };
 
 class SearchServer {
@@ -58,32 +72,19 @@ public:
         }
     }
 
-    void AddDocument(int document_id, const string &document) {
-        /**
-         *  Добавляет документ в db (типа db)
-         *  Рассчитайте TF слова кот в документе 1.
-         *  Всего слов в этом документе четыре, из них кот — только одно.
-         *  1 / 4 = 0,25.
-         *  А слово пушистый встречается дважды, так что его TF в этом документе
-         *  будет 2 / 4 = 0,5.
-         *  Вычисляется TF каждого слова запроса в документе
-         *  сколько раз встречается слово в документе / всего слов в документе
-         */
+    void AddDocument(int document_id, const string &document, const vector<int> &ratings) {
         // документ очищенный от стоп-слов
         const vector<string> words = SplitIntoWordsNoStop(document);
-        Document doc;
-        doc.id = document_id;
         const double inv_word_count = 1.0 / words.size();
-        for (const string& word : words) {
+        for (const string &word: words) {
             word_to_document_freqs_[word][document_id] += inv_word_count;
         }
-        ++document_count_;
+        document_ratings_.emplace(document_id, ComputeAverageRating(ratings));
     }
 
     vector<Document> FindTopDocuments(const string &raw_query) const {
         const Query query = ParseQuery(raw_query);
         auto matched_documents = FindAllDocuments(query);
-
         sort(matched_documents.begin(), matched_documents.end(),
              [](const Document &lhs, const Document &rhs) {
                  return lhs.relevance > rhs.relevance;
@@ -95,66 +96,13 @@ public:
     }
 
 private:
-    struct QueryWord {
-        string data;
-        bool is_minus;
-        bool is_stop;
-    };
-
-    struct Query {
-        set<string> plus_words;
-        set<string> minus_words;
-    };
-
-    // в поисковой системе количество документов
     int document_count_ = 0;
-
-    // word_to_documents - в нём будет храниться инвертированный индекс документов.
-    map<string, map<int, double>> word_to_document_freqs_;
-
     set<string> stop_words_;
+    map<int, int> document_ratings_;
+    map<string, map<int, double>> word_to_document_freqs_;
 
     bool IsStopWord(const string &word) const {
         return stop_words_.count(word) > 0;
-    }
-
-    // IDF слова
-    double IDFWord(const double &document_size) const {
-        // Статическое преобразование типа в double
-        return log(document_count_ / static_cast<double>(document_size));
-    }
-
-    // Вычислите IDF слова кот. Оно встречается в двух документах из трёх: 0 и 1
-    // 3 / 2 = 1,5
-    // вычисляется IDF каждого слова в запросе
-    map<int, double> IDFQuery(const Query &query) const {
-        double idf_word = 0;
-        map<int, double> documents_relevant;
-
-        /**
-         * https://practicum.yandex.ru/trainer/cpp/lesson/db917dd8-0bbf-4c25-ba23-474534ccc4aa/task/80b48a36-4d57-46ed-a783-788207e516e8/?hideTheory=1
-         * Рассчитывают IDF так:
-         * Количество всех документов делят на количество тех, где встречается слово.
-         * Не встречающиеся нигде слова в расчёт не берут, поэтому деления на ноль опасаться не надо.
-         * Важно, встречается ли слово в документе. А сколько раз встречается — всё равно.
-         * К результату деления применяют логарифм — функцию log из библиотеки <cmath>.
-         */
-        for (const auto &plus_word: query.plus_words) {
-            if (word_to_document_freqs_.count(plus_word)) {
-                // Константная ссылка
-                const auto &document_ids = word_to_document_freqs_.at(plus_word);
-                // К результату деления применяют логарифм — функцию log из библиотеки <cmath>
-                // это IDF текущего слова
-                // Количество всех документов делят на количество документов, где встречается
-                idf_word = IDFWord(document_ids.size());
-                // IDF каждого слова запроса умножается на TF этого слова в этом документе,
-                // все произведения IDF и TF в документе суммируются.
-                for (const auto &document: document_ids) {
-                    documents_relevant[document.first] += (idf_word * document.second);
-                }
-            }
-        }
-        return documents_relevant;
     }
 
     vector<string> SplitIntoWordsNoStop(const string &text) const {
@@ -167,15 +115,25 @@ private:
         return words;
     }
 
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
+
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
-        // Word shouldn't be empty
         if (text[0] == '-') {
             is_minus = true;
             text = text.substr(1);
         }
         return {text, is_minus, IsStopWord(text)};
     }
+
+    struct Query {
+        set<string> plus_words;
+        set<string> minus_words;
+    };
 
     Query ParseQuery(const string &text) const {
         Query query;
@@ -192,14 +150,50 @@ private:
         return query;
     }
 
+    double ComputeWordInverseDocumentFreq(const string &word) const {
+        return log(document_count_ * 1.0 / word_to_document_freqs_.at(word).size());
+    }
+
     vector<Document> FindAllDocuments(const Query &query) const {
-        // релевантные документы
-        vector<Document> matched_documents;
         map<int, double> document_to_relevance;
-        for (const auto &relevance: IDFQuery(query)) {
-            matched_documents.push_back({relevance.first, double(relevance.second)});
+        for (const string &word: query.plus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
+            for (const auto [document_id, term_freq]: word_to_document_freqs_.at(word)) {
+                document_to_relevance[document_id] += term_freq * inverse_document_freq;
+            }
+        }
+
+        for (const string &word: query.minus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            for (const auto [document_id, _]: word_to_document_freqs_.at(word)) {
+                document_to_relevance.erase(document_id);
+            }
+        }
+
+        vector<Document> matched_documents;
+        for (const auto [document_id, relevance]: document_to_relevance) {
+            matched_documents.push_back({document_id, relevance, document_ratings_.at(document_id)});
         }
         return matched_documents;
+    }
+
+    static int ComputeAverageRating(const vector<int> &ratings) {
+        /*
+        * Первая цифра — это количество оценок. Считайте их, передайте в AddDocument в
+        * виде вектора целых чисел и вычислите средний рейтинг документа,
+        * разделив суммарный рейтинг на количество оценок.
+        * Рейтинг документа, не имеющего оценок, равен нулю.
+        * */
+        int rating = ratings.size();
+
+        if (!rating) return rating;
+
+        return accumulate(ratings.begin(), ratings.end(), 0) / rating;
     }
 };
 
@@ -207,17 +201,22 @@ SearchServer CreateSearchServer() {
     SearchServer search_server;
     search_server.SetStopWords(ReadLine());
     const int document_count = ReadLineWithNumber();
+
     for (int document_id = 0; document_id < document_count; ++document_id) {
-        search_server.AddDocument(document_id, ReadLine());
+        string document = ReadLine();
+        vector<int> rating = ReadLineRating();
+        search_server.AddDocument(document_id, document, rating);
     }
     return search_server;
 }
 
 int main() {
     const SearchServer search_server = CreateSearchServer();
-    const string query = ReadLine();
-    for (const auto &[document_id, relevance]: search_server.FindTopDocuments(query)) {
-        cout << "{ document_id = "s << document_id << ", "
-             << "relevance = "s << relevance << " }"s << endl;
+    const string query = ReadLine(); // это запрос считывается не документ! бл... 😝
+
+    for (const auto &[document_id, relevance, rating]: search_server.FindTopDocuments(query)) {
+        cout << "{ document_id = "s << document_id << ", "s
+             << "relevance = "s << relevance << ", "s
+             << "rating = "s << rating << " }"s << endl;
     }
 }
